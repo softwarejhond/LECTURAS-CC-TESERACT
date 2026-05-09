@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verificador de Documentos</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}" />
+  <style>
+    body { background-color: #f4f6f9; }
+    .card-header-primary { background-color: #0d6efd; color: #fff; }
+    #spinner { display: none; }
+
+    .field-tag {
+      display: inline-block;
+      font-size: 0.76rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin: 1px 0;
+      color: #fff;
+      white-space: nowrap;
+    }
+    .field-ok  { background: #198754; }
+    .field-no  { background: #dc3545; }
+    .field-na  { background: #6c757d; }
+
+    thead th {
+      background-color: #0d6efd;
+      color: #fff;
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    #tableWrapper { max-height: 60vh; overflow: auto; }
+
+    .progress      { height: 20px; }
+    .progress-bar  { transition: width 0.3s ease; min-width: 2ch; }
+    .pct-bar       { height: 16px; min-width: 70px; }
+    .pct-bar .progress-bar { font-size: 0.72rem; transition: none; }
+
+    .doc-preview {
+      width: 98px;
+      min-width: 98px;
+    }
+    .doc-preview-btn {
+      border: 1px solid #dbe4f0;
+      background: #fff;
+      padding: 3px;
+      border-radius: 8px;
+      width: 100%;
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+    .doc-preview-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0.35rem 1rem rgba(13, 110, 253, 0.12);
+    }
+    .doc-preview-img {
+      width: 100%;
+      height: 34px;
+      object-fit: cover;
+      border-radius: 8px;
+      display: block;
+      background: #eef2f7;
+    }
+    .doc-preview-label {
+      display: block;
+      margin-top: 2px;
+      font-size: 0.64rem;
+      color: #5b6572;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .doc-preview-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 34px;
+      border-radius: 7px;
+      background: #f7f9fd;
+      color: #0d3f8f;
+      font-weight: 700;
+      font-size: 0.68rem;
+      text-decoration: none;
+      border: 1px solid #d7e3f7;
+    }
+    .doc-preview-link:hover {
+      color: #0b3270;
+      text-decoration: none;
+    }
+    .doc-preview-empty {
+      width: 98px;
+      min-width: 98px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+      border: 1px dashed #c4ced9;
+      border-radius: 10px;
+      background: #f8fafc;
+      color: #7a8696;
+      font-size: 0.68rem;
+      text-align: center;
+    }
+    #previewModal img {
+      width: 100%;
+      max-height: 75vh;
+      object-fit: contain;
+      border-radius: 12px;
+      background: #f5f7fb;
+    }
+
+    @keyframes rowIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .row-new { animation: rowIn 0.25s ease; }
+
+    #traceWrapper {
+      max-height: 24vh;
+      overflow: auto;
+      background: #0f172a;
+      color: #dbeafe;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+      font-size: 0.75rem;
+      padding: 8px;
+    }
+    .trace-line {
+      margin: 0;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+      white-space: pre-wrap;
+    }
+    .trace-time {
+      color: #93c5fd;
+      margin-right: 6px;
+    }
+    .trace-step {
+      color: #86efac;
+      margin-right: 6px;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+<div class="container py-4">
+
+  <!-- Encabezado / Formulario -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header card-header-primary py-3">
+      <h5 class="mb-0">Verificador de Documentos de Identidad Colombianos</h5>
+    </div>
+    <div class="card-body">
+ 
+      <form id="uploadForm" enctype="multipart/form-data">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-8">
+            <label for="archivo" class="form-label fw-semibold">Archivo Excel (.xlsx / .xlsm)</label>
+            <input class="form-control" type="file" id="archivo" name="archivo"
+                   accept=".xlsx,.xlsm" required />
+          </div>
+          <div class="col-md-4">
+            <button type="submit" id="btnProcesar" class="btn btn-primary w-100">
+              <span id="btnText">Procesar</span>
+              <span id="spinner" class="spinner-border spinner-border-sm ms-2" role="status"></span>
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Alerta de error -->
+  <div id="alertError" class="alert alert-danger d-none" role="alert"></div>
+
+  <!-- Barra de progreso -->
+  <div id="progressSection" class="card shadow-sm mb-4 d-none">
+    <div class="card-body py-2">
+      <div class="d-flex justify-content-between mb-1">
+        <small class="text-muted">Procesando filas…</small>
+        <small id="progressLabel" class="text-muted fw-semibold">0 / 0</small>
+      </div>
+      <div class="progress">
+        <div id="progressBar"
+             class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+             role="progressbar" style="width:0%">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contadores en tiempo real -->
+  <div id="resumen" class="row g-3 mb-4 d-none">
+    <div class="col-6 col-md-3">
+      <div class="card text-center shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">Procesadas</div>
+          <h3 id="cntTotal" class="fw-bold mb-0">0</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">OK (&ge;60%)</div>
+          <h3 id="cntOk" class="fw-bold mb-0 text-success">0</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">A Revisar</div>
+          <h3 id="cntRev" class="fw-bold mb-0 text-danger">0</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">Sin PDF</div>
+          <h3 id="cntSin" class="fw-bold mb-0 text-secondary">0</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trazas del proceso en tiempo real -->
+  <div id="traceCard" class="card shadow-sm mb-4 d-none">
+    <div class="card-header card-header-primary py-2 d-flex justify-content-between align-items-center">
+      <span class="fw-semibold">Proceso en Tiempo Real</span>
+      <small id="traceHint" class="text-white-50">Mostrando pasos de OCR y comparación...</small>
+    </div>
+    <div class="card-body py-2">
+      <div id="traceWrapper"></div>
+    </div>
+  </div>
+
+  <!-- Tabla de resultados -->
+  <div id="resultadosCard" class="card shadow-sm d-none">
+    <div class="card-header card-header-primary py-2 d-flex justify-content-between align-items-center">
+      <span class="fw-semibold">Resultados</span>
+      <div class="d-flex gap-2 align-items-center">
+        <button id="btnDescargar" class="btn btn-success btn-sm d-none" title="Descargar resultados en Excel">
+          ⬇ Descargar Excel
+        </button>
+        <input type="text" id="filtroTabla" class="form-control form-control-sm w-auto"
+               placeholder="Filtrar por documento…" />
+      </div>
+    </div>
+    <div id="tableWrapper">
+      <table class="table table-hover table-bordered mb-0 align-middle">
+        <thead>
+          <tr>
+            <th class="text-center">#</th>
+            <th>Documento</th>
+            <th>Primer Nombre</th>
+            <th>Segundo Nombre</th>
+            <th>Primer Apellido</th>
+            <th>Segundo Apellido</th>
+            <th>F. Nacimiento</th>
+            <th>PDF Original</th>
+            <th>Campos</th>
+            <th>Coincidencia</th>
+            <th>Tiempo</th>
+            <th class="text-center">Estado</th>
+          </tr>
+        </thead>
+        <tbody id="tablaBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+<script>
+/* ── Referencias DOM ─────────────────────────────────── */
+const form            = document.getElementById('uploadForm');
+const btnProcesar     = document.getElementById('btnProcesar');
+const btnText         = document.getElementById('btnText');
+const spinner         = document.getElementById('spinner');
+const alertError      = document.getElementById('alertError');
+const progressSection = document.getElementById('progressSection');
+const progressBar     = document.getElementById('progressBar');
+const progressLabel   = document.getElementById('progressLabel');
+const resumen         = document.getElementById('resumen');
+const resultadosCard  = document.getElementById('resultadosCard');
+const tablaBody       = document.getElementById('tablaBody');
+const filtroTabla     = document.getElementById('filtroTabla');
+const tableWrapper    = document.getElementById('tableWrapper');
+const traceCard       = document.getElementById('traceCard');
+const traceWrapper    = document.getElementById('traceWrapper');
+const traceHint       = document.getElementById('traceHint');
+const cntTotal        = document.getElementById('cntTotal');
+const cntOk           = document.getElementById('cntOk');
+const cntRev          = document.getElementById('cntRev');
+const cntSin          = document.getElementById('cntSin');
+const btnDescargar    = document.getElementById('btnDescargar');
+
+/* ── Estado ──────────────────────────────────────────── */
+let allRows   = [];
+let totalRows = 0;
+let processed = 0;
+let okCount   = 0;
+let revCount  = 0;
+let sinCount  = 0;
+let filtroStr = '';
+let currentTraceFila = null;
+const MAX_TRACE_LINES = 30;
+
+/* ── Reset ───────────────────────────────────────────── */
+function resetUI() {
+  allRows = []; totalRows = 0; processed = 0;
+  okCount = 0; revCount = 0; sinCount = 0; filtroStr = '';
+  currentTraceFila = null;
+  alertError.classList.add('d-none');
+  progressSection.classList.add('d-none');
+  resumen.classList.add('d-none');
+  resultadosCard.classList.add('d-none');
+  traceCard.classList.add('d-none');
+  btnDescargar.classList.add('d-none');
+  tablaBody.innerHTML = '';
+  traceWrapper.innerHTML = '';
+  traceHint.textContent = 'Mostrando pasos de OCR y comparación...';
+  filtroTabla.value = '';
+  updateCounters();
+  setProgress(0, 0);
+}
+
+function appendTrace(t) {
+  traceCard.classList.remove('d-none');
+
+  const fila = Number(t.fila || 0);
+  if (fila && currentTraceFila !== fila) {
+    currentTraceFila = fila;
+    traceWrapper.innerHTML = '';
+    traceHint.textContent = `Procesando fila ${fila}...`;
+  }
+
+  const p = document.createElement('p');
+  p.className = 'trace-line';
+  const rowTxt = t.fila ? `Fila ${t.fila}` : 'Fila ?';
+  const docTxt = t.documento ? `Doc ${t.documento}` : 'Doc -';
+  const elapsed = Number(t.elapsed || 0).toFixed(2) + 's';
+  p.innerHTML = `<span class="trace-time">[${elapsed}]</span><span class="trace-step">${t.step || 'paso'}</span>${rowTxt} · ${docTxt} · ${t.detail || ''}`;
+  traceWrapper.appendChild(p);
+
+  while (traceWrapper.children.length > MAX_TRACE_LINES) {
+    traceWrapper.removeChild(traceWrapper.firstChild);
+  }
+
+  traceWrapper.scrollTop = traceWrapper.scrollHeight;
+}
+
+function showError(msg) {
+  alertError.textContent = msg;
+  alertError.classList.remove('d-none');
+}
+
+function setProgress(done, total) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  progressBar.style.width = pct + '%';
+  progressBar.textContent = pct + '%';
+  progressLabel.textContent = `${done} / ${total}`;
+}
+
+function updateCounters() {
+  cntTotal.textContent = processed;
+  cntOk.textContent    = okCount;
+  cntRev.textContent   = revCount;
+  cntSin.textContent   = sinCount;
+}
+
+/* ── Construcción de fila HTML ───────────────────────── */
+function fieldTag(label, info) {
+  if (!info) return `<span class="field-tag field-na" title="Sin dato">${label} —</span>`;
+  const cls  = info.encontrado ? 'field-ok' : 'field-no';
+  const icon = info.encontrado ? '✓' : '✗';
+  return `<span class="field-tag ${cls}" title="${info.valor || ''}">${label} ${icon}</span>`;
+}
+
+function buildRow(r) {
+  const m       = r.match;
+  const pct     = m ? m.porcentaje : null;
+  const estado  = m ? m.estado : '—';
+  const nombres = r.nombres || ['', '', '', ''];
+  const tiempoSeg = Number(r.tiempo_segundos || 0);
+  const tiempoTxt = Number.isFinite(tiempoSeg) ? `${tiempoSeg.toFixed(2)} s` : '—';
+  const pdfOriginal = r.pdf || '';
+  const pdfProcesado = r.pdf_procesado || '';
+
+  let camposHtml = '—';
+  if (m) {
+    camposHtml = [
+      fieldTag('Doc', m.documento),
+      fieldTag('N1',  m.primer_nombre),
+      fieldTag('N2',  m.segundo_nombre),
+      fieldTag('A1',  m.primer_apellido),
+      fieldTag('A2',  m.segundo_apellido),
+      fieldTag('Fec', m.fecha_nacimiento),
+    ].join('');
+  } else if (r.error) {
+    camposHtml = `<span class="text-danger small">${r.error}</span>`;
+  }
+
+  let barHtml = '—';
+  if (pct !== null) {
+    const color = pct >= 60 ? 'bg-success' : 'bg-danger';
+    barHtml = `<div class="progress pct-bar">
+      <div class="progress-bar ${color}" style="width:${pct}%">${pct}%</div></div>`;
+  }
+
+  const badgeCls  = estado === 'OK' ? 'bg-success'
+                  : estado === 'REVISAR' ? 'bg-danger' : 'bg-secondary';
+
+  const tr = document.createElement('tr');
+  tr.className   = 'row-new';
+  tr.dataset.doc = r.documento.toLowerCase();
+  tr.innerHTML   = `
+    <td class="text-center text-muted small">${r.fila}</td>
+    <td><strong>${r.documento}</strong></td>
+    <td>${nombres[0]}</td>
+    <td>${nombres[1]}</td>
+    <td>${nombres[2]}</td>
+    <td>${nombres[3]}</td>
+    <td class="small">${r.fecha_nacimiento}</td>
+    <td>${buildPdfCell(pdfOriginal, 'Original')}</td>
+    <td>${camposHtml}</td>
+    <td>${barHtml}</td>
+    <td class="small text-nowrap">${tiempoTxt}</td>
+    <td class="text-center"><span class="badge ${badgeCls}">${estado}</span></td>
+  `;
+  return tr;
+}
+
+function buildPdfCell(url, label = 'Documento') {
+  if (!url) {
+    return `<div class="doc-preview-empty">sin PDF</div>`;
+  }
+
+  return `<div class="doc-preview">
+    <div class="doc-preview-btn">
+      <a class="doc-preview-link" href="${url}" target="_blank" rel="noopener noreferrer">Ver PDF</a>
+      <span class="doc-preview-label">${label}</span>
+    </div>
+  </div>`;
+}
+
+function rowVisible(r) {
+  return !filtroStr || r.documento.toLowerCase().includes(filtroStr);
+}
+
+/* ── Filtro ──────────────────────────────────────────── */
+filtroTabla.addEventListener('input', () => {
+  filtroStr = filtroTabla.value.toLowerCase().trim();
+  tablaBody.innerHTML = '';
+  allRows.filter(rowVisible).forEach(r => tablaBody.appendChild(buildRow(r)));
+});
+
+/* ── Submit con Fetch + ReadableStream (SSE manual) ──── */
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  resetUI();
+
+  btnProcesar.disabled   = true;
+  spinner.style.display  = 'inline-block';
+  btnText.textContent    = 'Procesando…';
+  progressSection.classList.remove('d-none');
+  resumen.classList.remove('d-none');
+  traceCard.classList.remove('d-none');
+
+  let response;
+  try {
+    response = await fetch('/procesar', { method: 'POST', body: new FormData(form) });
+  } catch (err) {
+    showError('Error de conexión: ' + err.message);
+    endProcessing();
+    return;
+  }
+
+  if (!response.ok || !response.body) {
+    showError('Error del servidor (' + response.status + ')');
+    endProcessing();
+    return;
+  }
+
+  const reader  = response.body.getReader();
+  const decoder = new TextDecoder();
+  let   buffer  = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Los eventos SSE se separan por \n\n
+      const msgs = buffer.split('\n\n');
+      buffer = msgs.pop() ?? '';   // fragmento incompleto al final
+
+      for (const msg of msgs) {
+        if (!msg.startsWith('data: ')) continue;
+        let data;
+        try { data = JSON.parse(msg.slice(6)); } catch { continue; }
+
+        if (data.type === 'meta') {
+          // Primer evento: total de filas para la barra de progreso
+          totalRows = data.total;
+          setProgress(0, totalRows);
+
+        } else if (data.type === 'row') {
+          // Fila procesada: actualizar contadores y tabla al instante
+          processed++;
+          allRows.push(data);
+
+          if (currentTraceFila === data.fila) {
+            const estadoTxt = data.match?.estado || 'SIN RESULTADO';
+            const t = Number(data.tiempo_segundos || 0).toFixed(2);
+            traceHint.textContent = `Fila ${data.fila} lista (${estadoTxt}, ${t}s)`;
+          }
+
+          if (!data.match)                   sinCount++;
+          else if (data.match.estado === 'OK') okCount++;
+          else                               revCount++;
+
+          updateCounters();
+          setProgress(processed, totalRows);
+
+          if (rowVisible(data)) {
+            tablaBody.appendChild(buildRow(data));
+            resultadosCard.classList.remove('d-none');
+            // Scroll suave al fondo de la tabla
+            tableWrapper.scrollTop = tableWrapper.scrollHeight;
+          }
+
+        } else if (data.type === 'done') {
+          setProgress(totalRows, totalRows);
+          endProcessing(true);
+          return;
+
+        } else if (data.type === 'trace') {
+          appendTrace(data);
+
+        } else if (data.type === 'error') {
+          showError(data.message);
+        }
+      }
+    }
+  } catch (err) {
+    showError('Error al leer el stream: ' + err.message);
+  } finally {
+    endProcessing();
+  }
+});
+
+function endProcessing(success = false) {
+  btnProcesar.disabled  = false;
+  spinner.style.display = 'none';
+  btnText.textContent   = 'Procesar';
+  progressSection.classList.add('d-none');
+  if (success && allRows.length > 0) {
+    btnDescargar.classList.remove('d-none');
+  }
+}
+
+/* ── Descarga Excel ──────────────────────────────────── */
+btnDescargar.addEventListener('click', async () => {
+  btnDescargar.disabled = true;
+  btnDescargar.textContent = 'Generando…';
+  try {
+    const resp = await fetch('/descargar_excel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: allRows }),
+    });
+    if (!resp.ok) throw new Error('Error del servidor: ' + resp.status);
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    const cd   = resp.headers.get('Content-Disposition') || '';
+    const match = cd.match(/filename="?([^"]+)"?/);
+    a.download = match ? match[1] : 'verificacion.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showError('No se pudo descargar el Excel: ' + err.message);
+  } finally {
+    btnDescargar.disabled = false;
+    btnDescargar.textContent = '⬇ Descargar Excel';
+  }
+});
+</script>
+</body>
+</html>
